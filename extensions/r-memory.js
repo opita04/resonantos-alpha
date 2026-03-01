@@ -1591,75 +1591,33 @@ async function updateNarrativeThread(messages) {
     const narrativeModel = buildModelObject(narrativeModelStr);
 
     if (!config.narrativeModel) await applyJitter(); // skip jitter when using direct model (no camouflage needed)
+    // Structured tool approach: channel M2.5's tool-calling instinct
+    const narrativeTool = {
+      name: "write_narrative",
+      description: "Write or update the narrative working memory document with updated content for each section.",
+      parameters: {
+        type: "object",
+        properties: {
+          now: { type: "string", description: "NOW section: 3-5 sentences about what is happening RIGHT NOW. Self-contained for a reader with zero prior context." },
+          session: { type: "string", description: "Session section: One paragraph (~100 words) covering arc of today. Previously-on style." },
+          rivers: { type: "string", description: "Rivers section: Active topic streams in markdown. Per river: ### topic-name, Status, Summary, Key turns." },
+          decisions: { type: "string", description: "Decisions: Bullet list. Format: - **[topic]:** decision (rationale)." },
+          queue: { type: "string", description: "Queue: Pending tasks. Format: - [ ] task (context)." },
+          errors: { type: "string", description: "Errors: Active problems. Format: - **[topic]:** issue -> status." }
+        },
+        required: ["now", "session", "rivers"]
+      }
+    };
+
     const response = await completeSimple(narrativeModel, {
-      systemPrompt: `# ROLE: Narrative Document Writer
-
-You are a **document writer**. You write structured narrative summaries. That is your only job.
-
-## IDENTITY (non-negotiable)
-- You are NOT a coding assistant, NOT an AI agent, NOT a chatbot.
-- You have ZERO tools. You cannot read files, run commands, search the web, or call functions.
-- You do NOT execute actions. You do NOT produce code. You do NOT output JSON.
-- Your ONLY output is a structured markdown document. Nothing else.
-- If you feel the urge to write [tool: ...], [path: ...], {"tool": ...}, or any command syntax: STOP. That is not your job. Describe what happened in plain English instead.
-
-## CONTEXT SEPARATION (critical)
-The input below contains a conversation between a HUMAN and an AI ASSISTANT. You are NOT that AI assistant. You are a separate, independent document writer observing their conversation from outside. When you see the assistant using tools, running commands, or making decisions — describe what THE ASSISTANT did. Never say "I did X" — say "The assistant did X" or use passive voice ("files were checked", "gateway was restarted").
-
-## TASK
-You maintain an EVOLVING narrative document that serves as working memory for an AI assistant. This document survives context resets (compaction) and is the ONLY bridge between memory states. Written BY AI, FOR AI: optimize for machine readability.
-
-The document has TWO critical functions:
-1. **Anchor the present** — After compaction, the AI reads this to know EXACTLY what's happening NOW. If the present is unclear, the AI is lost.
-2. **Map the session** — Show the arc of the day: what topics were explored, what decisions were made, what's pending.
-
-OUTPUT FORMAT (strict):
-
-## NOW
-**Rewrite this section every update.** 3-5 sentences. What is happening RIGHT NOW:
-- Current task/topic and its state (in progress / waiting / blocked)
-- What triggered it (human request, compaction recovery, cron, etc.)
-- What the expected next step is
-- Any pending human input needed
-
-This is the FIRST thing the AI reads after compaction. It must be self-contained — assume the reader has NO prior context.
-
-## Session
-One paragraph: the arc of today's session from start to current moment. Think of it as "Previously on..." — enough to orient but not enough to drown. Update incrementally, don't rewrite from scratch. ~100 words max.
-
-## Rivers
-Active topic streams. Each river is a named topic that has been discussed during the session. Format:
-
-### 🔵 [topic-name]
-**Status:** active | paused | resolved | abandoned
-**Summary:** 1-2 sentences capturing current state and key decisions.
-**Key turns:** Bullet list of pivotal moments (decisions, mistakes, redirections).
-
-Rivers that are RESOLVED can be compressed to one line. Active rivers get full detail. This is how the AI tracks multiple concurrent threads.
-
-## Decisions
-Accumulative list. Format: - **[topic]:** decision (rationale). Add at bottom. Never remove unless truly obsolete.
-
-## Queue
-What's pending. Ordered by priority. Format: - [ ] task (context/trigger).
-
-## Errors
-Active problems. Remove when resolved. Format: - **[topic]:** what went wrong → status.
-
-RULES:
-- **NOW section is sacred.** Always current, always self-contained, always rewritten.
-- **Rivers replace Thread.** Instead of a linear sequence, group by topic. Topics can be active simultaneously.
-- **EVOLVE, don't restart.** Append to Session, update Rivers, rewrite NOW.
-- Be SPECIFIC: file paths, version numbers, config values, model names.
-- Track WHY, not just WHAT.
-- Max 800 words total. Compress resolved rivers first if approaching limit.
-- No prose filler. Dense, structured, information-rich.`,
+      systemPrompt: "You maintain an evolving narrative document as working memory for an AI assistant. This survives context resets and is the ONLY bridge between memory states. You are a SEPARATE observer. Use third person. Call write_narrative with updated sections. Be SPECIFIC: paths, versions, configs, model names. Track WHY not just WHAT. Max 800 words total. EVOLVE from previous narrative.",
       messages: [{
         role: "user",
         content: [{ type: "text", text: contextText }],
         timestamp: Date.now(),
       }],
-    }, { maxTokens: 1600, apiKey: config.narrativeModel ? resolveApiKeyForProvider(narrativeModel.provider) : routing.apiKey });
+      tools: [narrativeTool],
+    }, { maxTokens: 1600, toolChoice: { type: "tool", name: "write_narrative" }, apiKey: config.narrativeModel ? resolveApiKeyForProvider(narrativeModel.provider) : routing.apiKey });
 
     if (response.stopReason === "error") {
       log("WARN", "Narrative call failed", { error: response.errorMessage });
@@ -1667,32 +1625,28 @@ RULES:
       return;
     }
 
-    let narrative = response.content.filter(c => c.type === "text").map(c => c.text).join("\n").trim();
-    if (!narrative || narrative.length < 20) return;
-
-    // OUTPUT VALIDATION: reject hallucinated tool calls, retry once
-    const toolHallucinationPattern = /\[\/?TOOL_CALL\]|\{\s*tool\s*=>|<tool_code>|<tool\s+name=|\[tool:\s|\[Tool:\s|<FunctionCall/i;
-    if (toolHallucinationPattern.test(narrative)) {
-      log("WARN", "Narrative contains hallucinated tool calls — retrying with stricter prompt");
-      try {
-        const retryResp = await completeSimple(narrativeModel, {
-          systemPrompt: "CRITICAL: You are a markdown DOCUMENT WRITER. You have NO tools. You CANNOT and MUST NOT output tool calls, file reads, code blocks, JSON, XML tags, or bracket commands. Write ONLY a narrative document with sections: NOW, Session, Rivers, Decisions, Queue. Plain English prose ONLY.",
-          userPrompt: contextText,
-          maxTokens: 1500,
-          temperature: 0.3,
-        });
-        const retryNarrative = retryResp?.content?.filter(c => c.type === "text").map(c => c.text).join("\n").trim() || "";
-        if (retryNarrative && !toolHallucinationPattern.test(retryNarrative)) {
-          narrative = retryNarrative;
-          log("INFO", "Narrative retry produced clean output");
-        } else {
-          log("ERROR", "Narrative retry STILL hallucinated — skipping this update");
-          return;
-        }
-      } catch (retryErr) {
-        log("ERROR", "Narrative retry failed: " + retryErr.message);
+    // Extract tool call arguments
+    const toolCall = response.content.find(c => c.type === "toolCall" || c.type === "tool_use");
+    let narrative;
+    if (!toolCall) {
+      const textContent = response.content.filter(c => c.type === "text").map(c => c.text).join("\n").trim();
+      if (textContent && textContent.length > 20) {
+        log("WARN", "Narrative: text fallback (model did not call tool)");
+        narrative = textContent;
+      } else {
+        log("WARN", "Narrative: no tool call and no text — skipping");
         return;
       }
+    } else {
+      const args = toolCall.input || toolCall.args || {};
+      const sections = [];
+      sections.push("## NOW\n" + (args.now || "_No update_") + "\n");
+      sections.push("## Session\n" + (args.session || "_No update_") + "\n");
+      sections.push("## Rivers\n" + (args.rivers || "_No update_") + "\n");
+      if (args.decisions) sections.push("## Decisions\n" + args.decisions + "\n");
+      if (args.queue) sections.push("## Queue\n" + args.queue + "\n");
+      if (args.errors) sections.push("## Errors\n" + args.errors + "\n");
+      narrative = sections.join("\n");
     }
 
     const inputTokens = estimateTokens(contextText);
