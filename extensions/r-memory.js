@@ -72,8 +72,8 @@ const DEFAULT_CONFIG = {
   blockSize: 4000,
   minCompressChars: 200,
   minSwapTokens: 50,
-  compressionModel: "openai-codex/gpt-4o-mini",
-  narrativeModel: null, // null = use camouflage routing; set explicitly to bypass (e.g. "anthropic/claude-opus-4-6")
+  compressionModel: "minimax/MiniMax-M2.5",
+  narrativeModel: "minimax/MiniMax-M2.5", // MiniMax for narrative
   maxParallelCompressions: 4,
   storageDir: "r-memory",
   archiveDir: "r-memory/archive",
@@ -532,7 +532,7 @@ function groupEntriesIntoBlocks(branchEntries, startIndex) {
     if (msg.role === "user" && currentEntries.length > 0) {
       // Check: is this user message a tool_result paired with a preceding tool_use?
       const prevMsg = currentEntries.length > 0 ? currentEntries[currentEntries.length - 1].message : null;
-      if (hasToolResult(msg) && prevMsg && hasToolUse(prevMsg)) {
+      if (hasToolResult(msg) && prevMsg && (hasToolUse(prevMsg) || hasToolResult(prevMsg))) {
         // Keep tool_result with its tool_use — don't start a new turn
         currentEntries.push({ index: i, id: entry.id, message: msg });
       } else {
@@ -654,6 +654,117 @@ function getMessageFromEntry(entry) {
   return null;
 }
 
+/**
+ * Scan raw entries for orphaned tool_result references.
+ * Returns adjusted firstKeptEntryId that ensures all tool_results
+ * have matching tool_uses within the kept range.
+ */
+function validateToolPairs(branchEntries, firstKeptEntryId) {
+  const firstKeptIdx = branchEntries.findIndex(e => e.id === firstKeptEntryId);
+  if (firstKeptIdx < 0) return firstKeptEntryId;
+
+  // Collect all tool_use IDs in the kept range
+  const toolUseIds = new Set();
+  const toolResultIds = new Set();
+
+  for (let i = firstKeptIdx; i < branchEntries.length; i++) {
+    const msg = getMessageFromEntry(branchEntries[i]);
+    if (!msg) continue;
+
+    // Collect tool_use IDs from assistant messages
+    if (Array.isArray(msg.content)) {
+      for (const block of msg.content) {
+        if (block.type === "toolCall" && block.toolCallId) toolUseIds.add(block.toolCallId);
+        if (block.type === "tool_use" && block.id) toolUseIds.add(block.id);
+        if (block.type === "tool_result" && block.tool_use_id) toolResultIds.add(block.tool_use_id);
+      }
+    }
+    if (Array.isArray(msg.tool_calls)) {
+      for (const tc of msg.tool_calls) {
+        if (tc.id) toolUseIds.add(tc.id);
+      }
+    }
+
+    // Collect tool_result IDs
+    if (msg.role === "toolResult" && msg.toolCallId) toolResultIds.add(msg.toolCallId);
+    if (msg.role === "tool" && msg.tool_call_id) toolResultIds.add(msg.tool_call_id);
+  }
+
+  // Find orphaned tool_result IDs (reference tool_use not in kept range)
+  const orphaned = [];
+  for (const id of toolResultIds) {
+    if (!toolUseIds.has(id)) orphaned.push(id);
+  }
+
+  if (orphaned.length === 0) return firstKeptEntryId;
+
+  // Walk firstKeptEntryId backward to include the missing tool_uses
+  let adjustedIdx = firstKeptIdx;
+  const stillMissing = new Set(orphaned);
+
+  for (let k = firstKeptIdx - 1; k >= 0 && stillMissing.size > 0; k--) {
+    const msg = getMessageFromEntry(branchEntries[k]);
+    if (!msg) continue;
+
+    let foundInEntry = false;
+    if (Array.isArray(msg.content)) {
+      for (const block of msg.content) {
+        if ((block.type === "toolCall" && stillMissing.has(block.toolCallId)) ||
+            (block.type === "tool_use" && stillMissing.has(block.id))) {
+          stillMissing.delete(block.toolCallId || block.id);
+          foundInEntry = true;
+        }
+      }
+    }
+    if (Array.isArray(msg.tool_calls)) {
+      for (const tc of msg.tool_calls) {
+        if (stillMissing.has(tc.id)) {
+          stillMissing.delete(tc.id);
+          foundInEntry = true;
+        }
+      }
+    }
+
+    if (foundInEntry) {
+      adjustedIdx = k;
+    }
+
+    // Stop at a user message without tool content (turn boundary)
+    if (msg.role === "user" && !msg.tool_call_id && !(msg.role === "toolResult") &&
+        !(Array.isArray(msg.content) && msg.content.some(b => b.type === "tool_result"))) {
+      if (stillMissing.size > 0) {
+        // Can't find the tool_uses — they're from a previous compaction. Log and accept the orphans.
+        log("WARN", "Cannot resolve all orphaned tool_results — unreachable tool_uses", {
+          orphanedIds: [...stillMissing],
+          adjustedIdx,
+          firstKeptIdx
+        });
+      }
+      break;
+    }
+  }
+
+  if (adjustedIdx < firstKeptIdx) {
+    log("WARN", "validateToolPairs: adjusted firstKeptEntryId backward", {
+      firstKeptIdx,
+      adjustedIdx,
+      orphanedCount: orphaned.length,
+      resolved: orphaned.length - stillMissing.size,
+      unresolved: stillMissing.size
+    });
+    return branchEntries[adjustedIdx].id;
+  }
+
+  // If we couldn't resolve orphans by walking back, log it
+  if (stillMissing.size > 0) {
+    log("WARN", "validateToolPairs: unresolvable orphaned tool_results", {
+      orphanedIds: [...stillMissing]
+    });
+  }
+
+  return firstKeptEntryId;
+}
+
 // ============================================================================
 // API key resolution (provider-aware)
 // ============================================================================
@@ -672,7 +783,7 @@ function resolveApiKeyForProvider(provider) {
       if (data.profiles) {
         for (const [key, profile] of Object.entries(data.profiles)) {
           if (key.includes(provider)) {
-            const tok = profile?.token || profile?.key || profile?.access;
+            const tok = profile?.token || profile?.access;
             if (tok) { log("INFO", `API key from auth-profiles (${key})`); return tok; }
           }
         }
@@ -702,7 +813,7 @@ function discoverProviders() {
       const data = JSON.parse(fs.readFileSync(agentAuth, "utf-8"));
       if (data.profiles) {
         for (const [key, profile] of Object.entries(data.profiles)) {
-          if (profile?.token || profile?.key) {
+          if (profile?.token) {
             const prov = profile.provider || key.split(":")[0] || "unknown";
             providers.push({ key, provider: prov });
           }
@@ -837,6 +948,8 @@ RULES:
 - Remove filler, pleasantries, redundancy
 - Preserve reasoning behind key decisions (WHY something was chosen, not just WHAT)
 - Remove routine reasoning and intermediate steps that led to obvious conclusions
+- DISCARD entirely: heartbeat check-ins (HEARTBEAT_OK), post-compaction audit responses, system bookkeeping, NO_REPLY exchanges. These have zero long-term value.
+- Focus on: human-AI interaction, decisions, plans, implementations, errors, and actionable information.
 - Content inside <PRESERVE_VERBATIM> tags must be kept EXACTLY as-is
 - This is compression, NOT summarization. Minimize information loss.
 - Output must be significantly shorter than input`,
@@ -865,9 +978,39 @@ RULES:
 // ============================================================================
 // Background compression queue
 // ============================================================================
+/**
+ * Noise filter: detect blocks that are pure system bookkeeping with no user-facing value.
+ * These get cached with empty compressed text so compaction drops them entirely.
+ */
+function isNoiseBlock(text) {
+  if (!text) return false;
+  const normalized = text.trim();
+
+  // Pure heartbeat exchanges (poll + OK response, short blocks only)
+  if (/HEARTBEAT_OK/i.test(normalized) && normalized.length < 500) return true;
+
+  // Post-compaction audit responses (system audit + file reads with no substantive content)
+  // Only filter if the block doesn't contain actual decisions, plans, or work
+  if (/Post-Compaction Audit/i.test(normalized) && !/\b(decision|agreed|plan|build|fix|implement|design|strategy|bug|error|deploy)\b/i.test(normalized)) return true;
+
+  // Pure NO_REPLY blocks (AI had nothing to say)
+  if (/^\s*(?:\[(?:AI|Assistant)\]:?\s*)?NO_REPLY\s*$/m.test(normalized) && normalized.length < 300) return true;
+
+  // System cron completion with NO_REPLY (cron reported, AI said nothing useful)
+  if (/\[System Message\].*cron.*completed/i.test(normalized) && /NO_REPLY/i.test(normalized) && normalized.length < 800) return true;
+
+  return false;
+}
+
 function queueBlock(block) {
   if (!config.enabled || !completeSimple || !resolvedApiKey) return;
   if (messageCache.has(block.hash)) return;
+  // Noise filter: skip compression for pure bookkeeping blocks
+  if (isNoiseBlock(block.text)) {
+    log("INFO", "Noise block filtered — skipping compression", { hash: block.hash.slice(0, 8), tokens: block.tokens });
+    messageCache.set(block.hash, { compressed: "", tokensRaw: block.tokens, tokensCompressed: 0, isNoise: true });
+    return;
+  }
   if (block.text.length < config.minCompressChars) {
     messageCache.set(block.hash, { compressed: block.text, tokensRaw: block.tokens, tokensCompressed: block.tokens });
     return;
@@ -1064,6 +1207,13 @@ async function handleBeforeCompact(event) {
     if (totalSaved >= overflow) break;
     const block = blocks[i];
     const cached = messageCache.get(block.hash);
+    // Drop noise blocks entirely during compaction
+    if (cached && cached.isNoise) {
+      // Return empty — this block adds no value to compaction summary
+      totalSaved += block.tokens; // Full savings — block disappears
+      blocksToSwap++;
+      continue;
+    }
     const compressedTokens = cached ? cached.tokensCompressed : Math.ceil(block.tokens * 0.6);
     const savings = block.tokens - compressedTokens;
     totalSaved += savings;
@@ -1106,6 +1256,43 @@ async function handleBeforeCompact(event) {
     return { cancel: true };
   }
 
+  // === FIX: Orphaned tool_result prevention ===
+  // If the first raw entry is a tool_result, its tool_use was compressed away.
+  // Walk backward to find the tool_use and pull the boundary back.
+  {
+    const firstKeptIdx = branchEntries.findIndex(e => e.id === firstKeptEntryId);
+    if (firstKeptIdx > 0) {
+      const firstKeptMsg = getMessageFromEntry(branchEntries[firstKeptIdx]);
+      if (firstKeptMsg && (
+        firstKeptMsg.role === "toolResult" ||
+        firstKeptMsg.role === "tool" ||
+        (Array.isArray(firstKeptMsg.content) && firstKeptMsg.content.some(b => b.type === "tool_result"))
+      )) {
+        for (let k = firstKeptIdx - 1; k >= 0; k--) {
+          const candidateMsg = getMessageFromEntry(branchEntries[k]);
+          if (!candidateMsg) continue;
+          const isToolUse = candidateMsg.role === "assistant" && (
+            (Array.isArray(candidateMsg.content) && candidateMsg.content.some(b => b.type === "toolCall" || b.type === "tool_use")) ||
+            (Array.isArray(candidateMsg.tool_calls) && candidateMsg.tool_calls.length > 0)
+          );
+          if (isToolUse) {
+            firstKeptEntryId = branchEntries[k].id;
+            log("WARN", "Adjusted firstKeptEntryId backward to prevent orphaned tool_result", {
+              originalIdx: firstKeptIdx,
+              adjustedIdx: k,
+              adjustedId: firstKeptEntryId
+            });
+            break;
+          }
+          if (candidateMsg.role === "user" && !candidateMsg.tool_call_id) break;
+        }
+      }
+    }
+  }
+
+  // === FIX 2: Comprehensive tool_result validation ===
+  firstKeptEntryId = validateToolPairs(branchEntries, firstKeptEntryId);
+
   // Preserve previous compressed content in history (first time only)
   if (compactionHistory.length === 0 && prevCompactionIndex >= 0) {
     const prevEntry = branchEntries[prevCompactionIndex];
@@ -1139,7 +1326,11 @@ async function handleBeforeCompact(event) {
     const cached = messageCache.get(block.hash);
     if (cached) {
       cacheHits++;
-      compressedSlots.push({ hash: block.hash, result: cached });
+      if (cached.isNoise) {
+        compressedSlots.push({ hash: block.hash, result: null });
+      } else {
+        compressedSlots.push({ hash: block.hash, result: cached });
+      }
     } else {
       cacheMisses++;
       // === DIAGNOSTIC: Log miss details for hash alignment debugging ===
@@ -1268,7 +1459,34 @@ async function updateNarrativeThread(messages) {
           text = msg.content.filter(b => b.type === "text").map(b => b.text).join("\n");
         }
         if (text.trim()) {
-          const truncated = text.slice(0, 3000);
+          // Aggressive input sanitization for narrative model
+          let cleanedText = text;
+          // Remove all bracket-command patterns
+          cleanedText = cleanedText.replace(/\[\/?(?:tool|path|cmd|action|params|file_path|command|Tool|TOOL_CALL)[:\s]?[^\]]*\]/gi, "");
+          cleanedText = cleanedText.replace(/\[TOOL_CALL\][\s\S]*?\[\/TOOL_CALL\]/gi, "");
+          cleanedText = cleanedText.replace(/\{\s*tool\s*=>\s*"[\s\S]*?\}[\s\S]*?\}/g, "");
+          // Remove tool call JSON blocks
+          cleanedText = cleanedText.replace(/```(?:json)?\s*\{[\s\S]*?"(?:tool|name|function)"[\s\S]*?```/g, "");
+          // Remove PRESERVE_VERBATIM blocks
+          cleanedText = cleanedText.replace(/<PRESERVE_VERBATIM>[\s\S]*?<\/PRESERVE_VERBATIM>/g, "");
+          // Remove tool results
+          cleanedText = cleanedText.replace(/\[Tool Result\][:\s]?[\s\S]*?(?=\n\n|\n\[|$)/g, "");
+          // Remove post-compaction audit messages (noise for narrative)
+          cleanedText = cleanedText.replace(/⚠️ Post-Compaction Audit[\s\S]*?after memory compaction\./g, "");
+          // Remove system timestamps/metadata blocks
+          cleanedText = cleanedText.replace(/System: \[\d{4}-\d{2}-\d{2}[^\]]*\]/g, "");
+          // Remove JSON metadata blocks
+          cleanedText = cleanedText.replace(/```json\s*\{\s*"(?:schema|timestamp|chat_id)"[\s\S]*?```/g, "");
+          // Remove backtick-quoted tool refs
+          cleanedText = cleanedText.replace(/`\[Tool:?\s*\w+\]`/gi, "(action)");
+          // Remove XML-style tool patterns
+          cleanedText = cleanedText.replace(/<\/?(?:tool_code|tool|param|function_call|function_result|FunctionCallBegin|FunctionCallEnd)[^>]*>/gi, "");
+          cleanedText = cleanedText.replace(/<FunctionCallBegin>[\s\S]*?<\/?FunctionCallEnd>\\?n?/gi, "");
+          cleanedText = cleanedText.replace(/^.*\btool\s*=>\s*".*$/gm, "");
+          // Clean excessive whitespace
+          cleanedText = cleanedText.replace(/\n{3,}/g, "\n\n").trim();
+          if (!cleanedText) continue;
+          const truncated = cleanedText.slice(0, 3000);
           recentExchanges.unshift({ role: "human", text: truncated });
           extractedTokens += estimateTokens(truncated);
         }
@@ -1276,8 +1494,32 @@ async function updateNarrativeThread(messages) {
         const parts = [];
         if (Array.isArray(msg.content)) {
           for (const b of msg.content) {
-            if (b.type === "text") parts.push(b.text);
-            else if (b.type === "toolCall") parts.push(`[Tool: ${b.name}]`);
+            if (b.type === "text") {
+              let cleaned = b.text;
+              // Aggressive input sanitization for non-Opus narrative models:
+              // 1. Remove all bracket-command patterns: [tool: x], [path: "x"], [cmd: "x"], etc.
+              cleaned = cleaned.replace(/\[\/?(?:tool|path|cmd|action|params|file_path|command|Tool|TOOL_CALL)[:\s]?[^\]]*\]/gi, "");
+              cleaned = cleaned.replace(/\[TOOL_CALL\][\s\S]*?\[\/TOOL_CALL\]/gi, "");
+              cleaned = cleaned.replace(/\{\s*tool\s*=>\s*"[\s\S]*?\}[\s\S]*?\}/g, "");
+              // 2. Remove JSON tool call blocks
+              cleaned = cleaned.replace(/```(?:json)?\s*\{[\s\S]*?"(?:tool|name|function)"[\s\S]*?```/g, "");
+              // 3. Remove PRESERVE_VERBATIM blocks (OpenClaw internal)
+              cleaned = cleaned.replace(/<PRESERVE_VERBATIM>[\s\S]*?<\/PRESERVE_VERBATIM>/g, "");
+              // 4. Remove tool result markers
+              cleaned = cleaned.replace(/\[Tool Result\][:\s]?[\s\S]*?(?=\n\n|\n\[|$)/g, "");
+              // 5. Remove lines that look like tool invocations
+              cleaned = cleaned.replace(/^\s*\{\s*"(?:tool|name|file_path|command|path)"\s*:.*$/gm, "");
+              // 5b. Remove backtick-quoted tool refs like `[Tool: exec]`
+              cleaned = cleaned.replace(/`\[Tool:?\s*\w+\]`/gi, "(action)");
+              // 5c. Remove XML-style tool patterns
+              cleaned = cleaned.replace(/<\/?(?:tool_code|tool|param|function_call|function_result|FunctionCallBegin|FunctionCallEnd)[^>]*>/gi, "");
+              cleaned = cleaned.replace(/<FunctionCallBegin>[\s\S]*?<\/?FunctionCallEnd>\\?n?/gi, "");
+              cleaned = cleaned.replace(/^.*\btool\s*=>\s*".*$/gm, "");
+              // 6. Clean excessive whitespace
+              cleaned = cleaned.replace(/\n{3,}/g, "\n\n").trim();
+              if (cleaned && cleaned.length > 20) parts.push(cleaned);
+            }
+            // Skip toolCall and toolResult blocks entirely
           }
         }
         text = parts.join("\n").slice(0, 3000);
@@ -1301,17 +1543,35 @@ async function updateNarrativeThread(messages) {
 
     // If narrative is getting large, only send last 4000 chars as context
     // but instruct the AI to preserve the full structure
-    const narrativeContext = previousNarrative.length > 4000
-      ? previousNarrative.slice(-4000)
-      : previousNarrative;
+    // Sanitize previous narrative to break self-reinforcing hallucination loops
+    let sanitizedNarrative = previousNarrative;
+    sanitizedNarrative = sanitizedNarrative.replace(/\[\/?(?:tool|path|cmd|action|params|file_path|command|Tool|TOOL_CALL)[:\s]?[^\]]*\]/gi, "");
+    sanitizedNarrative = sanitizedNarrative.replace(/\[TOOL_CALL\][\s\S]*?\[\/TOOL_CALL\]/gi, "");
+    sanitizedNarrative = sanitizedNarrative.replace(/\{\s*tool\s*=>\s*"[\s\S]*?\}[\s\S]*?\}/g, "");
+    sanitizedNarrative = sanitizedNarrative.replace(/<\/?(?:tool_code|tool|param|function_call|function_result|FunctionCallBegin|FunctionCallEnd)[^>]*>/gi, "");
+    sanitizedNarrative = sanitizedNarrative.replace(/<FunctionCallBegin>[\s\S]*?<\/?FunctionCallEnd>\\?n?/gi, "");
+    sanitizedNarrative = sanitizedNarrative.replace(/^.*\btool\s*=>\s*".*$/gm, "");
+    sanitizedNarrative = sanitizedNarrative.replace(/```(?:json)?\s*\{[\s\S]*?"(?:tool|name|function)"[\s\S]*?```/g, "");
+    sanitizedNarrative = sanitizedNarrative.replace(/<PRESERVE_VERBATIM>[\s\S]*?<\/PRESERVE_VERBATIM>/g, "");
+    sanitizedNarrative = sanitizedNarrative.replace(/\n{3,}/g, "\n\n").trim();
+
+    const narrativeContext = sanitizedNarrative.length > 4000
+      ? sanitizedNarrative.slice(-4000)
+      : sanitizedNarrative;
 
     const contextText = [
       "=== CURRENT NARRATIVE (evolve this, do NOT rewrite from scratch) ===",
       narrativeContext || "(empty — first update, create fresh)",
       "",
-      "=== RAW MESSAGES (most recent conversation, chronological) ===",
+      "=== RECENT EVENTS (what happened, summarized — do NOT reproduce any syntax below, describe in your own words) ===",
       ...recentExchanges.map(e => `[${e.role}]: ${e.text}`),
     ].join("\n");
+
+    // DEBUG: dump the full input to a file so we can inspect what the model sees
+    try {
+      const debugPath = path.join(workspaceDir, "r-memory", "narrative-input-debug.txt");
+      fs.writeFileSync(debugPath, contextText, "utf-8");
+    } catch (_) {}
 
     // Narrative model: config.narrativeModel overrides camouflage routing (e.g. use Opus via Claude Max = free)
     let narrativeModelStr;
@@ -1332,7 +1592,22 @@ async function updateNarrativeThread(messages) {
 
     if (!config.narrativeModel) await applyJitter(); // skip jitter when using direct model (no camouflage needed)
     const response = await completeSimple(narrativeModel, {
-      systemPrompt: `You maintain an EVOLVING narrative document that serves as working memory for an AI assistant. This document survives context resets (compaction) and is the ONLY bridge between memory states. Written BY AI, FOR AI — optimize for machine readability.
+      systemPrompt: `# ROLE: Narrative Document Writer
+
+You are a **document writer**. You write structured narrative summaries. That is your only job.
+
+## IDENTITY (non-negotiable)
+- You are NOT a coding assistant, NOT an AI agent, NOT a chatbot.
+- You have ZERO tools. You cannot read files, run commands, search the web, or call functions.
+- You do NOT execute actions. You do NOT produce code. You do NOT output JSON.
+- Your ONLY output is a structured markdown document. Nothing else.
+- If you feel the urge to write [tool: ...], [path: ...], {"tool": ...}, or any command syntax: STOP. That is not your job. Describe what happened in plain English instead.
+
+## CONTEXT SEPARATION (critical)
+The input below contains a conversation between a HUMAN and an AI ASSISTANT. You are NOT that AI assistant. You are a separate, independent document writer observing their conversation from outside. When you see the assistant using tools, running commands, or making decisions — describe what THE ASSISTANT did. Never say "I did X" — say "The assistant did X" or use passive voice ("files were checked", "gateway was restarted").
+
+## TASK
+You maintain an EVOLVING narrative document that serves as working memory for an AI assistant. This document survives context resets (compaction) and is the ONLY bridge between memory states. Written BY AI, FOR AI: optimize for machine readability.
 
 The document has TWO critical functions:
 1. **Anchor the present** — After compaction, the AI reads this to know EXACTLY what's happening NOW. If the present is unclear, the AI is lost.
@@ -1392,8 +1667,33 @@ RULES:
       return;
     }
 
-    const narrative = response.content.filter(c => c.type === "text").map(c => c.text).join("\n").trim();
+    let narrative = response.content.filter(c => c.type === "text").map(c => c.text).join("\n").trim();
     if (!narrative || narrative.length < 20) return;
+
+    // OUTPUT VALIDATION: reject hallucinated tool calls, retry once
+    const toolHallucinationPattern = /\[\/?TOOL_CALL\]|\{\s*tool\s*=>|<tool_code>|<tool\s+name=|\[tool:\s|\[Tool:\s|<FunctionCall/i;
+    if (toolHallucinationPattern.test(narrative)) {
+      log("WARN", "Narrative contains hallucinated tool calls — retrying with stricter prompt");
+      try {
+        const retryResp = await completeSimple(narrativeModel, {
+          systemPrompt: "CRITICAL: You are a markdown DOCUMENT WRITER. You have NO tools. You CANNOT and MUST NOT output tool calls, file reads, code blocks, JSON, XML tags, or bracket commands. Write ONLY a narrative document with sections: NOW, Session, Rivers, Decisions, Queue. Plain English prose ONLY.",
+          userPrompt: contextText,
+          maxTokens: 1500,
+          temperature: 0.3,
+        });
+        const retryNarrative = retryResp?.content?.filter(c => c.type === "text").map(c => c.text).join("\n").trim() || "";
+        if (retryNarrative && !toolHallucinationPattern.test(retryNarrative)) {
+          narrative = retryNarrative;
+          log("INFO", "Narrative retry produced clean output");
+        } else {
+          log("ERROR", "Narrative retry STILL hallucinated — skipping this update");
+          return;
+        }
+      } catch (retryErr) {
+        log("ERROR", "Narrative retry failed: " + retryErr.message);
+        return;
+      }
+    }
 
     const inputTokens = estimateTokens(contextText);
     const outputTokens = estimateTokens(narrative);
