@@ -39,7 +39,7 @@ const CRYPTO_CONFIG = {
             icon: '📊'
         }
     },
-    
+
     // Subscription tiers
     tiers: {
         essential: {
@@ -64,7 +64,7 @@ const CRYPTO_CONFIG = {
             icon: '🏢'
         }
     },
-    
+
     // Supported chains and tokens
     chains: {
         solana: {
@@ -83,10 +83,10 @@ const CRYPTO_CONFIG = {
             icon: 'Ξ'
         }
     },
-    
+
     // Payment check interval (ms)
     pollInterval: 5000,
-    
+
     // Payment expiry (30 minutes)
     expiryMinutes: 30
 };
@@ -97,6 +97,16 @@ const CRYPTO_CONFIG = {
 
 let currentPayment = null;
 let paymentPollInterval = null;
+
+function escapeHTML(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
 
 // ============================================
 // Payment Flow
@@ -112,11 +122,11 @@ async function initCryptoPayment(productId, durationMonths = 1, chain = 'solana'
         showToast('Invalid product selected', 'error');
         return;
     }
-    
+
     try {
         // Show loading state
         showPaymentModal(product, durationMonths, 'loading', { chain, token });
-        
+
         // Request payment details from server
         const response = await fetch('/api/crypto/checkout', {
             method: 'POST',
@@ -128,21 +138,21 @@ async function initCryptoPayment(productId, durationMonths = 1, chain = 'solana'
                 token: token
             })
         });
-        
+
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.error || 'Failed to create payment');
         }
-        
+
         const paymentData = await response.json();
         currentPayment = paymentData;
-        
+
         // Update modal with payment details
         showPaymentModal(product, durationMonths, 'waiting', paymentData);
-        
+
         // Start polling for payment
         startPaymentPolling(paymentData.payment_id);
-        
+
     } catch (error) {
         console.error('Crypto payment error:', error);
         showPaymentModal(product, durationMonths, 'error', { error: error.message });
@@ -157,12 +167,12 @@ function startPaymentPolling(paymentId) {
     if (paymentPollInterval) {
         clearInterval(paymentPollInterval);
     }
-    
+
     paymentPollInterval = setInterval(async () => {
         try {
             const response = await fetch(`/api/crypto/status?payment_id=${paymentId}`);
             const status = await response.json();
-            
+
             if (status.status === 'confirmed') {
                 clearInterval(paymentPollInterval);
                 paymentPollInterval = null;
@@ -172,7 +182,7 @@ function startPaymentPolling(paymentId) {
                 paymentPollInterval = null;
                 onPaymentExpired();
             }
-            
+
             // Update time remaining
             if (status.expires_at && currentPayment) {
                 const remaining = new Date(status.expires_at) - new Date();
@@ -180,7 +190,7 @@ function startPaymentPolling(paymentId) {
                     updateTimeRemaining(remaining);
                 }
             }
-            
+
         } catch (error) {
             console.error('Payment poll error:', error);
         }
@@ -205,10 +215,10 @@ async function verifyTransaction(txSignature) {
         showToast('No active payment to verify', 'error');
         return;
     }
-    
+
     try {
         showToast('Verifying transaction...', 'info');
-        
+
         const response = await fetch('/api/crypto/verify', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -217,16 +227,16 @@ async function verifyTransaction(txSignature) {
                 tx_signature: txSignature
             })
         });
-        
+
         const result = await response.json();
-        
+
         if (result.verified) {
             stopPaymentPolling();
             onPaymentConfirmed(result);
         } else {
             showToast(result.error || 'Transaction could not be verified', 'error');
         }
-        
+
     } catch (error) {
         console.error('Verification error:', error);
         showToast('Failed to verify transaction', 'error');
@@ -238,7 +248,7 @@ async function verifyTransaction(txSignature) {
  */
 function onPaymentConfirmed(data) {
     currentPayment = null;
-    
+
     // Update modal to success state
     const modalBody = document.querySelector('#cryptoPaymentModal .modal-body');
     if (modalBody) {
@@ -250,17 +260,17 @@ function onPaymentConfirmed(data) {
                 ${data.tx_signature ? `
                     <div class="tx-details">
                         <span class="label">Transaction:</span>
-                        <a href="https://explorer.solana.com/tx/${data.tx_signature}?cluster=devnet" 
+                        <a href="https://explorer.solana.com/tx/${escapeHTML(data.tx_signature)}?cluster=devnet" 
                            target="_blank" class="tx-link">
-                            ${data.tx_signature.substring(0, 16)}...
+                            ${escapeHTML(data.tx_signature).substring(0, 16)}...
                         </a>
                     </div>
                 ` : ''}
-                <p class="success-note">License active until: ${data.license_expires || 'N/A'}</p>
+                <p class="success-note">License active until: ${escapeHTML(data.license_expires || 'N/A')}</p>
             </div>
         `;
     }
-    
+
     // Update footer
     const modalFooter = document.querySelector('#cryptoPaymentModal .modal-footer');
     if (modalFooter) {
@@ -268,9 +278,9 @@ function onPaymentConfirmed(data) {
             <button class="btn-primary" onclick="closeCryptoPaymentModal()">Done</button>
         `;
     }
-    
+
     showToast('Payment confirmed! Add-on activated.', 'success');
-    
+
     // Refresh add-ons list after a short delay
     setTimeout(() => {
         if (typeof loadAddons === 'function') {
@@ -284,7 +294,7 @@ function onPaymentConfirmed(data) {
  */
 function onPaymentExpired() {
     currentPayment = null;
-    
+
     const modalBody = document.querySelector('#cryptoPaymentModal .modal-body');
     if (modalBody) {
         modalBody.innerHTML = `
@@ -295,7 +305,7 @@ function onPaymentExpired() {
             </div>
         `;
     }
-    
+
     const modalFooter = document.querySelector('#cryptoPaymentModal .modal-footer');
     if (modalFooter) {
         modalFooter.innerHTML = `
@@ -303,7 +313,7 @@ function onPaymentExpired() {
             <button class="btn-primary" onclick="closeCryptoPaymentModal(); location.reload();">Try Again</button>
         `;
     }
-    
+
     showToast('Payment expired. Please try again.', 'warning');
 }
 
@@ -313,12 +323,12 @@ function onPaymentExpired() {
 function updateTimeRemaining(remainingMs) {
     const el = document.getElementById('paymentTimeRemaining');
     if (!el) return;
-    
+
     const minutes = Math.floor(remainingMs / 60000);
     const seconds = Math.floor((remainingMs % 60000) / 1000);
-    
+
     el.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-    
+
     if (minutes < 5) {
         el.classList.add('urgent');
     }
@@ -333,7 +343,7 @@ function updateTimeRemaining(remainingMs) {
  */
 function showPaymentModal(product, durationMonths, state, data = {}) {
     let modal = document.getElementById('cryptoPaymentModal');
-    
+
     // Create modal if it doesn't exist
     if (!modal) {
         modal = document.createElement('div');
@@ -341,15 +351,15 @@ function showPaymentModal(product, durationMonths, state, data = {}) {
         modal.className = 'modal';
         document.body.appendChild(modal);
     }
-    
+
     const totalUsd = product.priceUsd * durationMonths;
     const chain = data.chain || 'solana';
     const token = data.token || 'SOL';
     const chainInfo = CRYPTO_CONFIG.chains[chain] || CRYPTO_CONFIG.chains.solana;
-    
+
     let bodyContent = '';
     let footerContent = '';
-    
+
     switch (state) {
         case 'loading':
             bodyContent = `
@@ -362,11 +372,11 @@ function showPaymentModal(product, durationMonths, state, data = {}) {
                 <button class="btn-secondary" onclick="closeCryptoPaymentModal()">Cancel</button>
             `;
             break;
-            
+
         case 'waiting':
             const amountCrypto = data.amount_crypto || data.amount_sol || 0;
             const tokenPrice = data.token_price_usd || data.sol_price_usd || 0;
-            
+
             bodyContent = `
                 <div class="payment-details">
                     <div class="addon-summary">
@@ -397,14 +407,14 @@ function showPaymentModal(product, durationMonths, state, data = {}) {
                     <div class="payment-address-section">
                         <label>Send ${token} to this ${chainInfo.name} address:</label>
                         <div class="address-box">
-                            <code id="paymentAddress">${data.payment_address}</code>
+                            <code id="paymentAddress">${escapeHTML(data.payment_address)}</code>
                             <button class="copy-btn" onclick="copyPaymentAddress()">📋</button>
                         </div>
                     </div>
                     
                     <div class="qr-code-section">
                         <div class="qr-container" id="paymentQR">
-                            ${generateQRCode(data.payment_address, 180)}
+                            ${generateQRCode(escapeHTML(data.payment_address), 180)}
                         </div>
                         <p class="qr-hint">Scan with your ${chainInfo.name} wallet</p>
                     </div>
@@ -436,13 +446,13 @@ function showPaymentModal(product, durationMonths, state, data = {}) {
                 <div class="network-badge ${chain}">${data.network || 'testnet'}</div>
             `;
             break;
-            
+
         case 'error':
             bodyContent = `
                 <div class="payment-error">
                     <div class="error-icon">❌</div>
                     <h3>Payment Error</h3>
-                    <p>${data.error || 'An error occurred while creating the payment.'}</p>
+                    <p>${escapeHTML(data.error || 'An error occurred while creating the payment.')}</p>
                 </div>
             `;
             footerContent = `
@@ -451,7 +461,7 @@ function showPaymentModal(product, durationMonths, state, data = {}) {
             `;
             break;
     }
-    
+
     modal.innerHTML = `
         <div class="modal-content">
             <div class="modal-header">
@@ -466,7 +476,7 @@ function showPaymentModal(product, durationMonths, state, data = {}) {
             </div>
         </div>
     `;
-    
+
     modal.classList.add('active');
 }
 
@@ -499,12 +509,12 @@ function copyPaymentAddress() {
 function manualVerify() {
     const input = document.getElementById('txSignatureInput');
     const signature = input?.value?.trim();
-    
+
     if (!signature) {
         showToast('Please enter a transaction signature', 'warning');
         return;
     }
-    
+
     verifyTransaction(signature);
 }
 
@@ -514,7 +524,7 @@ function manualVerify() {
 function generateQRCode(address, size = 180) {
     // Use a simple QR code API service for reliability
     const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(address)}&bgcolor=1a1a1a&color=4ade80`;
-    
+
     return `
         <img src="${qrApiUrl}" alt="QR Code" class="qr-image" 
              onerror="this.onerror=null; this.parentElement.innerHTML = generateQRFallback('${address}');" />
@@ -551,7 +561,7 @@ function showPaymentChoice(productId, durationMonths = 1) {
         showToast('Invalid product', 'error');
         return;
     }
-    
+
     let modal = document.getElementById('paymentChoiceModal');
     if (!modal) {
         modal = document.createElement('div');
@@ -559,9 +569,9 @@ function showPaymentChoice(productId, durationMonths = 1) {
         modal.className = 'modal';
         document.body.appendChild(modal);
     }
-    
+
     const totalUsd = product.priceUsd * durationMonths;
-    
+
     modal.innerHTML = `
         <div class="modal-content payment-choice-modal">
             <div class="modal-header">
@@ -631,7 +641,7 @@ function showPaymentChoice(productId, durationMonths = 1) {
             </div>
         </div>
     `;
-    
+
     modal.classList.add('active');
 }
 
@@ -675,10 +685,10 @@ function updatePaymentDuration(addonId) {
  */
 async function payWithStripe(addonId) {
     const duration = getDuration();
-    
+
     try {
         showToast('Redirecting to Stripe...', 'info');
-        
+
         const response = await fetch('/api/stripe/checkout', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -687,15 +697,15 @@ async function payWithStripe(addonId) {
                 duration_months: duration
             })
         });
-        
+
         const data = await response.json();
-        
+
         if (data.checkout_url) {
             window.location.href = data.checkout_url;
         } else {
             throw new Error(data.error || 'Failed to create Stripe checkout');
         }
-        
+
     } catch (error) {
         console.error('Stripe checkout error:', error);
         showToast('Failed to start Stripe checkout', 'error');
@@ -718,7 +728,7 @@ function showToast(message, type = 'info') {
         toast.className = `toast ${type}`;
         toast.textContent = message;
         document.body.appendChild(toast);
-        
+
         setTimeout(() => toast.classList.add('show'), 10);
         setTimeout(() => {
             toast.classList.remove('show');

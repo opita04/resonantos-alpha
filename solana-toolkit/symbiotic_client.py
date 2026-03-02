@@ -61,10 +61,13 @@ class SymbioticClient:
             secret = json.load(f)
         self.keypair = Keypair.from_bytes(bytes(secret))
 
+        if network != "devnet":
+            print(f"[SECURITY] Enforcing DevNet-only policy. Refused network: {network}")
+            network = "devnet"
         rpcs = {
             "devnet": "https://api.devnet.solana.com",
             "testnet": "https://api.testnet.solana.com",
-            "mainnet-beta": "https://api.mainnet-beta.com",
+            "mainnet-beta": "https://api.mainnet-beta.solana.com",
         }
         self.client = Client(rpcs.get(network, network))
         self.network = network

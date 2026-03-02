@@ -86,3 +86,18 @@ This file tracks modifications made to the ResonantOS system architecture, confi
 - **Description**: Updated the hardcoded `SSOT_ROOT` from `WORKSPACE / "resonantos-augmentor" / "ssot"` to point to the correct local repository path `C:\AI\Openclaw-Projects\resonantos-alpha\ssot`.
 - **Reason**: The dashboard was looking for the SSoT files in the wrong directory, preventing it from displaying SSoT files accurately in the UI. 
 - **Effect**: Server now points to the actual SSoT library. Server restarted to apply changes.
+## [2026-03-02]
+### Code Review Security & Bug Fixes
+- **Category**: Security / Bug Fix
+- **Description**: Addressed critical and high-priority code review findings across the system.
+  - **Path Traversal**: Fixed dashboard/server_v2.py and extensions/r-awareness.js to strictly validate paths inside workspace directories using os.path and path.resolve.
+  - **Database Bootstrap**: Added CREATE TABLE IF NOT EXISTS for chatbot schemas in dashboard/server_v2.py.
+  - **Fail Closed**: Updated gateway-lifecycle.js guard to block operations on error instead of failing open.
+  - **Unbounded Uploads**: Implemented 5MB file size and 20 document limits in chatbot knowledge uploads /api/chatbots/<bot_id>/knowledge.
+  - **Cross-Site Scripting (XSS)**: Stripped innerHTML vulnerabilities in crypto-payment.js by adding an escapeHTML wrapper for injected values.
+  - **DevNet Enforcement**: Added DevNet fallbacks and warnings to symbiotic_client.py and wallet transfer routes to strictly enforce DevNet-only interactions.
+  - **Config Parsing Error**: Renamed installer config key from maxDocs to maxDocsPerTurn so the R-Awareness extension can read limits correctly.
+  - **Hardcoded Paths**: Replaced esonantos-augmentor hardcoded strings across the repository with dynamic path references (Path(__file__).resolve().parent.parent).
+  - **Go Mangle Service Race**: Refactored service.go to remove a global mutable programInfo variable, scoping it to a struct and wrapping accesses with mutex locks.
+- **Reason**: Recommended by the code review in CODE_REVIEW_FINDINGS.md to secure backend endpoints, correct misconfigurations, and prevent system compromise.
+- **Effect**: Enhanced security against path traversals and XSS. Better DevNet safety rails and resolved several operational errors including broken configurations and Linux compatibility logic.

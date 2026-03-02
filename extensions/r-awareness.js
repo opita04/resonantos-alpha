@@ -66,7 +66,7 @@ function log(level, msg, data) {
   const line = `[${ts}] [${level}] ${msg}${data ? " " + JSON.stringify(data) : ""}`;
   try {
     fs.appendFileSync(path.join(workspaceDir, config.logFile), line + "\n");
-  } catch (e) {}
+  } catch (e) { }
 }
 
 function ensureDir(d) {
@@ -252,7 +252,14 @@ function detectLevel(relPath) {
  * Returns null if not found or unreadable.
  */
 function loadDocument(docPath) {
-  const fullPath = path.join(config.ssotRoot, docPath);
+  const fullPath = path.resolve(config.ssotRoot, docPath);
+  const root = path.resolve(config.ssotRoot);
+
+  if (!fullPath.startsWith(root)) {
+    log("WARN", "Path traversal blocked", { path: docPath });
+    return null;
+  }
+
   try {
     if (!fs.existsSync(fullPath)) {
       log("WARN", "Document not found", { path: docPath });

@@ -54,7 +54,7 @@ function log(level, message, data) {
     const dir = path.dirname(LOG_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.appendFileSync(LOG_FILE, entry + "\n");
-  } catch (_) {}
+  } catch (_) { }
 }
 
 function readTaskState() {
@@ -169,8 +169,8 @@ module.exports = function gatewayLifecycleExtension(api) {
       log("ALLOW", "Gateway command allowed");
       return {};
     } catch (err) {
-      log("ERROR", "Guard failed open: " + err.message);
-      return {};
+      log("ERROR", "Guard failed closed: " + err.message);
+      return { block: true, blockReason: "Gateway Lifecycle Guard error: " + err.message };
     }
   });
 };

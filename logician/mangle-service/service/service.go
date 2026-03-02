@@ -21,8 +21,7 @@ import (
 	pb "github.com/burakemir/mangle-service/proto"
 )
 
-var programInfo *analysis.ProgramInfo
-
+// Removed global programInfo to prevent race condition
 func copyDecl(decls map[ast.PredicateSym]*ast.Decl) map[ast.PredicateSym]ast.Decl {
 	m := make(map[ast.PredicateSym]ast.Decl, len(decls))
 	for k, v := range decls {
@@ -59,7 +58,7 @@ func New(dbPath string) (*MangleService, error) {
 		}
 		store = factstore.NewMergedStore([]factstore.ReadOnlyFactStore{s}, factstore.NewIndexedInMemoryStore())
 	}
-	return &MangleService{store: store, lock: sync.Mutex{}, programInfo: programInfo}, nil
+	return &MangleService{store: store, lock: sync.Mutex{}, programInfo: nil}, nil
 }
 
 // This should only be called once.
@@ -94,17 +93,20 @@ func (m *MangleService) UpdateFromSource(reader io.Reader) error {
 	if err != nil {
 		return err
 	}
-	programInfo = info
+	m.lock.Lock()
+	m.programInfo = info
+	m.lock.Unlock()
+	
 	strata, predToStratum, err := analysis.Stratify(analysis.Program{
-		EdbPredicates: programInfo.EdbPredicates,
-		IdbPredicates: programInfo.IdbPredicates,
-		Rules:         programInfo.Rules,
+		EdbPredicates: info.EdbPredicates,
+		IdbPredicates: info.IdbPredicates,
+		Rules:         info.Rules,
 	})
 	if err != nil {
 		return err
 	}
 	m.evalFn = func(store factstore.FactStore) (engine.Stats, error) {
-		return engine.EvalStratifiedProgramWithStats(programInfo, strata, predToStratum, store)
+		return engine.EvalStratifiedProgramWithStats(info, strata, predToStratum, store)
 	}
 	stats, err := m.evalFn(m.store)
 	if err != nil {
@@ -122,12 +124,20 @@ func (m *MangleService) Query(req *pb.QueryRequest, stream pb.Mangle_QueryServer
 		if err != nil {
 			return err
 		}
-		programInfo, err := analysis.Analyze([]parse.SourceUnit{u}, copyDecl(programInfo.Decls))
+		
+		m.lock.Lock()
+		var currentDecls map[ast.PredicateSym]*ast.Decl
+		if m.programInfo != nil {
+			currentDecls = m.programInfo.Decls
+		}
+		m.lock.Unlock()
+		
+		progInfo, err := analysis.Analyze([]parse.SourceUnit{u}, copyDecl(currentDecls))
 		if err != nil {
 			return err
 		}
 		store = factstore.NewTeeingStore(store)
-		stats, err := engine.EvalProgramWithStats(programInfo, store)
+		stats, err := engine.EvalProgramWithStats(progInfo, store)
 		if err != nil {
 			return err
 		}
@@ -172,11 +182,15 @@ func (m *MangleService) Update(ctx context.Context, req *pb.UpdateRequest) (*pb.
 	if err != nil {
 		return nil, err
 	}
-	programInfo = info
+	
+	m.lock.Lock()
+	m.programInfo = info
+	m.lock.Unlock()
+	
 	strata, predToStratum, err := analysis.Stratify(analysis.Program{
-		EdbPredicates: programInfo.EdbPredicates,
-		IdbPredicates: programInfo.IdbPredicates,
-		Rules:         programInfo.Rules,
+		EdbPredicates: info.EdbPredicates,
+		IdbPredicates: info.IdbPredicates,
+		Rules:         info.Rules,
 	})
 	if err != nil {
 		return nil, err
@@ -184,7 +198,7 @@ func (m *MangleService) Update(ctx context.Context, req *pb.UpdateRequest) (*pb.
 
 	updates := factstore.NewSimpleInMemoryStore()
 	merging := factstore.NewMergedStore([]factstore.FactStore{m.store}, updates)
-	stats, err := engine.EvalStratifiedProgramWithStats(programInfo, strata, predToStratum, merging)
+	stats, err := engine.EvalStratifiedProgramWithStats(info, strata, predToStratum, merging)
 	if err != nil {
 		return nil, err
 	}

@@ -26,7 +26,7 @@ from flask_cors import CORS
 _dashboard_dir = Path(__file__).resolve().parent
 _toolkit_candidates = [
     _dashboard_dir.parent / "solana-toolkit",  # sibling dir (standard layout: resonantos-alpha/solana-toolkit)
-    Path.home() / "resonantos-augmentor" / "solana-toolkit",  # dev/augmentor fallback
+    Path.home() / "resonantos-alpha" / "solana-toolkit",  # dev/augmentor fallback
     Path.home() / "resonantos-alpha" / "solana-toolkit",  # alpha explicit fallback
 ]
 for _toolkit_path in _toolkit_candidates:
@@ -76,7 +76,7 @@ if _CONFIG_FILE.exists():
 
 # Solana wallet integration
 _SOLANA_KEYPAIR = Path(_CFG.get("solana", {}).get("keypairPath", "~/.config/solana/id.json")).expanduser()
-_DAO_DETAILS = Path.home() / "resonantos-augmentor" / _CFG.get("paths", {}).get("daoDetails", "ssot/L2/DAO_DETAILS.json")
+_DAO_DETAILS = Path.home() / "resonantos-alpha" / _CFG.get("paths", {}).get("daoDetails", "ssot/L2/DAO_DETAILS.json")
 _REGISTRATION_BASKET_KEYPAIR = Path(_CFG.get("solana", {}).get("daoRegistrationBasketKeypairPath", "~/.config/solana/dao-registration-basket.json")).expanduser()
 _MIN_SOL_FOR_GAS = _CFG.get("solana", {}).get("minSolForGas", 0.01)
 
@@ -117,7 +117,7 @@ _paths_cfg = _CFG.get("paths", {})
 def _resolve_data_file(path_from_cfg: str, default_rel: str) -> Path:
     rel = path_from_cfg or default_rel
     candidates = [
-        Path.home() / "resonantos-augmentor" / rel,
+        Path.home() / "resonantos-alpha" / rel,
         _DASHBOARD_DIR / rel,
     ]
     for candidate in candidates:
@@ -805,7 +805,7 @@ def license_page():
 # ============================================================================
 
 DOCS_WORKSPACE = WORKSPACE  # ~/.openclaw/workspace
-REPO_DIR = Path.home() / "resonantos-augmentor"  # actual repo location
+REPO_DIR = Path(__file__).resolve().parent.parent  # actual repo location
 
 WORKSPACE_SYSTEM_FILES = {
     "AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md",
@@ -847,30 +847,30 @@ def _docs_build_tree():
     # 1. Repo docs/
     docs_dir = REPO_DIR / "docs"
     if docs_dir.exists():
-        items = _docs_build_folder_tree(docs_dir, "resonantos-augmentor/docs")
+        items = _docs_build_folder_tree(docs_dir, "resonantos-alpha/docs")
         if items:
-            tree.append({"name": "docs", "type": "folder", "path": "resonantos-augmentor/docs", "icon": "📖", "children": items, "fileCount": sum(i.get("fileCount", 0) if i["type"] == "folder" else 1 for i in items)})
+            tree.append({"name": "docs", "type": "folder", "path": "resonantos-alpha/docs", "icon": "📖", "children": items, "fileCount": sum(i.get("fileCount", 0) if i["type"] == "folder" else 1 for i in items)})
 
     # 2. SSoT
     ssot_dir = REPO_DIR / "ssot"
     if ssot_dir.exists():
-        items = _docs_build_folder_tree(ssot_dir, "resonantos-augmentor/ssot")
+        items = _docs_build_folder_tree(ssot_dir, "resonantos-alpha/ssot")
         if items:
-            tree.append({"name": "ssot", "type": "folder", "path": "resonantos-augmentor/ssot", "icon": "🗂️", "children": items, "fileCount": sum(i.get("fileCount", 0) if i["type"] == "folder" else 1 for i in items)})
+            tree.append({"name": "ssot", "type": "folder", "path": "resonantos-alpha/ssot", "icon": "🗂️", "children": items, "fileCount": sum(i.get("fileCount", 0) if i["type"] == "folder" else 1 for i in items)})
 
     # 3. Dashboard source
     dash_dir = REPO_DIR / "dashboard"
     if dash_dir.exists():
-        items = _docs_build_folder_tree(dash_dir, "resonantos-augmentor/dashboard")
+        items = _docs_build_folder_tree(dash_dir, "resonantos-alpha/dashboard")
         if items:
-            tree.append({"name": "dashboard", "type": "folder", "path": "resonantos-augmentor/dashboard", "icon": "📊", "children": items, "fileCount": sum(i.get("fileCount", 0) if i["type"] == "folder" else 1 for i in items)})
+            tree.append({"name": "dashboard", "type": "folder", "path": "resonantos-alpha/dashboard", "icon": "📊", "children": items, "fileCount": sum(i.get("fileCount", 0) if i["type"] == "folder" else 1 for i in items)})
 
     # 4. Reference
     ref_dir = REPO_DIR / "reference"
     if ref_dir.exists():
-        items = _docs_build_folder_tree(ref_dir, "resonantos-augmentor/reference")
+        items = _docs_build_folder_tree(ref_dir, "resonantos-alpha/reference")
         if items:
-            tree.append({"name": "reference", "type": "folder", "path": "resonantos-augmentor/reference", "icon": "📚", "children": items, "fileCount": sum(i.get("fileCount", 0) if i["type"] == "folder" else 1 for i in items)})
+            tree.append({"name": "reference", "type": "folder", "path": "resonantos-alpha/reference", "icon": "📚", "children": items, "fileCount": sum(i.get("fileCount", 0) if i["type"] == "folder" else 1 for i in items)})
 
     # 5. Workspace root .md files (excluding system files)
     root_docs = []
@@ -906,9 +906,9 @@ def api_docs_file():
     path = request.args.get("path", "")
     if path.startswith("/"):
         filepath = Path(path)
-    elif path.startswith("resonantos-augmentor/"):
+    elif path.startswith("resonantos-alpha/"):
         # Resolve against actual repo location
-        sub = path[len("resonantos-augmentor/"):]
+        sub = path[len("resonantos-alpha/"):]
         filepath = REPO_DIR / sub
     else:
         filepath = DOCS_WORKSPACE / path
@@ -944,8 +944,8 @@ def api_docs_open_editor():
         return jsonify({"error": "No path"}), 400
     if path.startswith("/"):
         filepath = Path(path)
-    elif path.startswith("resonantos-augmentor/"):
-        filepath = REPO_DIR / path[len("resonantos-augmentor/"):]
+    elif path.startswith("resonantos-alpha/"):
+        filepath = REPO_DIR / path[len("resonantos-alpha/"):]
     else:
         filepath = DOCS_WORKSPACE / path
     try:
@@ -997,11 +997,11 @@ def api_docs_search():
         except Exception:
             pass
 
-    # Search all browsable sources (REPO_DIR is ~/resonantos-augmentor, not inside workspace)
+    # Search all browsable sources (REPO_DIR is ~/resonantos-alpha, not inside workspace)
     search_roots = [
-        (REPO_DIR / "docs", "resonantos-augmentor/docs"),
-        (REPO_DIR / "ssot", "resonantos-augmentor/ssot"),
-        (REPO_DIR / "reference", "resonantos-augmentor/reference"),
+        (REPO_DIR / "docs", "resonantos-alpha/docs"),
+        (REPO_DIR / "ssot", "resonantos-alpha/ssot"),
+        (REPO_DIR / "reference", "resonantos-alpha/reference"),
         (DOCS_WORKSPACE / "memory", "memory"),
     ]
     for root, prefix in search_roots:
@@ -1071,9 +1071,9 @@ def api_docs_search_semantic():
         return snip, best_i + 1
 
     search_roots = [
-        ("resonantos-augmentor/docs", REPO_DIR / "docs"),
-        ("resonantos-augmentor/ssot", REPO_DIR / "ssot"),
-        ("resonantos-augmentor/reference", REPO_DIR / "reference"),
+        ("resonantos-alpha/docs", REPO_DIR / "docs"),
+        ("resonantos-alpha/ssot", REPO_DIR / "ssot"),
+        ("resonantos-alpha/reference", REPO_DIR / "reference"),
         ("memory", DOCS_WORKSPACE / "memory"),
     ]
     for prefix, root in search_roots:
@@ -1196,12 +1196,22 @@ def api_wallet_user():
         claim_val = claims.get(address)
         last_claim = claim_val if isinstance(claim_val, str) else (claim_val.get("last_claim") if isinstance(claim_val, dict) else None)
         
+        can_claim = True
+        if last_claim:
+            try:
+                from datetime import datetime, timedelta
+                last_dt = datetime.fromisoformat(last_claim)
+                if datetime.utcnow() - last_dt < timedelta(hours=24):
+                    can_claim = False
+            except Exception:
+                pass
+                
         return jsonify({
             "address": address,
             "network": network,
             "balances": wallet_data.get("balances", {}),
             "lastClaim": last_claim,
-            "canClaim": True  # Will be calculated based on 24h cooldown
+            "canClaim": can_claim
         })
         
     except Exception as e:
@@ -1443,7 +1453,10 @@ def api_wallet_build_transfer_tx():
         ix = _Ix(program_id, ix_data, accounts)
 
         # Optionally create recipient ATA if it doesn't exist
-        rpcs = {"devnet": "https://api.devnet.solana.com", "testnet": "https://api.testnet.solana.com", "mainnet-beta": "https://api.mainnet-beta.com"}
+        if network != "devnet":
+            print(f"[SECURITY] Enforcing DevNet-only policy. Refused network: {network}")
+            network = "devnet"
+        rpcs = {"devnet": "https://api.devnet.solana.com", "testnet": "https://api.testnet.solana.com", "mainnet-beta": "https://api.mainnet-beta.solana.com"}
         client = _Client(rpcs.get(network, network))
 
         instructions = []
@@ -1530,7 +1543,10 @@ def api_wallet_build_sol_transfer():
             ]
             ix = _Ix(system_prog, ix_data, accounts)
 
-        rpcs = {"devnet": "https://api.devnet.solana.com", "testnet": "https://api.testnet.solana.com", "mainnet-beta": "https://api.mainnet-beta.com"}
+        if network != "devnet":
+            print(f"[SECURITY] Enforcing DevNet-only policy. Refused network: {network}")
+            network = "devnet"
+        rpcs = {"devnet": "https://api.devnet.solana.com", "testnet": "https://api.testnet.solana.com", "mainnet-beta": "https://api.mainnet-beta.solana.com"}
         client = _Client(rpcs.get(network, network))
         blockhash_resp = client.get_latest_blockhash()
         blockhash = blockhash_resp.value.blockhash
@@ -2714,10 +2730,11 @@ def api_protocol_store_purchase():
             # marketplace program CPI (5wpGj4EG6J5uEqozLqUyHzEQbU26yjaL5aUE5FwBiYe5).
             # For alpha: balance check prevents abuse; users can't purchase
             # without sufficient $RES in their Symbiotic PDA.
-            app.logger.info(
-                f"Protocol purchase: {wallet_address} buying {protocol_id} "
-                f"(price={price_res} $RES, balance={pda_balance:.2f} $RES) "
-                f"— BALANCE CHECK PASSED, deduction pending on-chain escrow"
+            app.logger.warning(
+                f"SECURITY WARNING: Protocol purchase for {protocol_id} by {wallet_address} "
+                f"was authorized but NO $RES WAS DEDUCTED. Balance check passed "
+                f"(price={price_res}, balance={pda_balance:.2f}). "
+                f"This requires the Anchor marketplace program CPI for actual burn/escrow."
             )
 
         # Use Registration Basket as fee payer
@@ -3813,10 +3830,18 @@ def api_agent_model(agent_id):
     # Ensure agents section exists
     if "agents" not in cfg:
         cfg["agents"] = {}
-    if agent_id not in cfg["agents"]:
-        cfg["agents"][agent_id] = {}
-
-    cfg["agents"][agent_id]["model"] = model
+    if "list" not in cfg["agents"]:
+        cfg["agents"]["list"] = []
+    
+    found = False
+    for agent_entry in cfg["agents"]["list"]:
+        if agent_entry.get("id") == agent_id:
+            agent_entry["model"] = model
+            found = True
+            break
+            
+    if not found:
+        cfg["agents"]["list"].append({"id": agent_id, "model": model})
 
     try:
         cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
@@ -3893,10 +3918,14 @@ def api_rmemory_document():
     rel_path = request.args.get("path", "")
     use_compressed = request.args.get("compressed", "false").lower() == "true"
 
-    if not rel_path or ".." in rel_path:
+    if not rel_path or ".." in rel_path or rel_path.startswith("/") or rel_path.startswith("\\"):
         return jsonify({"error": "invalid path"}), 400
 
-    doc_path = SSOT_ROOT / rel_path
+    try:
+        doc_path = (SSOT_ROOT / rel_path).resolve()
+        doc_path.relative_to(SSOT_ROOT.resolve())
+    except ValueError:
+        return jsonify({"error": "invalid path traversal"}), 400
     if use_compressed:
         ai_path = doc_path.with_suffix(".ai.md")
         if ai_path.exists():
@@ -4009,13 +4038,16 @@ def api_rmemory_open_log():
     if platform.system() == "Windows":
         # Use 'start powershell' to tail the log on Windows
         subprocess.Popen(["powershell", "-Command", f"start powershell -ArgumentList 'Get-Content \"{log_path}\" -Wait'"])
-    else:
-        # macOS/Linux fallback (original logic)
+    elif platform.system() == "Darwin":
+        # macOS 
         cmd = f"tail -f {log_path}"
         subprocess.Popen([
             "osascript", "-e",
             f'tell application "Terminal" to do script "{cmd}"'
         ])
+    else:
+        # Linux fallback
+        subprocess.Popen(["x-terminal-emulator", "-e", f"tail -f {log_path}"])
     return jsonify({"ok": True})
 
 
@@ -4740,7 +4772,14 @@ def api_token_savings():
 @app.route("/api/r-memory/lock/<path:doc_path>", methods=["POST"])
 def api_rmemory_lock(doc_path):
     """Lock a document with chflags schg (requires sudo password)."""
-    full_path = SSOT_ROOT / doc_path
+    doc_path_str = str(doc_path)
+    if ".." in doc_path_str or doc_path_str.startswith("/") or doc_path_str.startswith("\\"):
+        return jsonify({"error": "invalid path"}), 400
+    try:
+        full_path = (SSOT_ROOT / doc_path).resolve()
+        full_path.relative_to(SSOT_ROOT.resolve())
+    except ValueError:
+        return jsonify({"error": "invalid path traversal"}), 400
     if not full_path.exists():
         return jsonify({"error": "not found"}), 404
     body = request.get_json(force=True) or {}
@@ -4763,7 +4802,14 @@ def api_rmemory_lock(doc_path):
 @app.route("/api/r-memory/unlock/<path:doc_path>", methods=["POST"])
 def api_rmemory_unlock(doc_path):
     """Unlock a document. Requires sudo password in body."""
-    full_path = SSOT_ROOT / doc_path
+    doc_path_str = str(doc_path)
+    if ".." in doc_path_str or doc_path_str.startswith("/") or doc_path_str.startswith("\\"):
+        return jsonify({"error": "invalid path"}), 400
+    try:
+        full_path = (SSOT_ROOT / doc_path).resolve()
+        full_path.relative_to(SSOT_ROOT.resolve())
+    except ValueError:
+        return jsonify({"error": "invalid path traversal"}), 400
     if not full_path.exists():
         return jsonify({"error": "not found"}), 404
 
@@ -4792,9 +4838,13 @@ def api_rmemory_document_save():
     body = request.get_json(force=True) or {}
     rel_path = body.get("path", "")
     content = body.get("content", "")
-    if not rel_path or ".." in rel_path:
+    if not rel_path or ".." in rel_path or rel_path.startswith("/") or rel_path.startswith("\\"):
         return jsonify({"ok": False, "error": "invalid path"}), 400
-    full_path = SSOT_ROOT / rel_path
+    try:
+        full_path = (SSOT_ROOT / rel_path).resolve()
+        full_path.relative_to(SSOT_ROOT.resolve())
+    except ValueError:
+        return jsonify({"ok": False, "error": "invalid path traversal"}), 400
     if not full_path.exists():
         return jsonify({"ok": False, "error": "not found"}), 404
     # Check lock
@@ -4880,7 +4930,14 @@ def api_ssot_keywords_put():
 @app.route("/api/r-memory/lock-layer/<layer>", methods=["POST"])
 def api_rmemory_lock_layer(layer):
     """Lock all documents in a layer."""
-    layer_dir = SSOT_ROOT / layer
+    layer_str = str(layer)
+    if ".." in layer_str or layer_str.startswith("/") or layer_str.startswith("\\"):
+        return jsonify({"ok": False, "error": "invalid layer"}), 400
+    try:
+        layer_dir = (SSOT_ROOT / layer).resolve()
+        layer_dir.relative_to(SSOT_ROOT.resolve())
+    except ValueError:
+        return jsonify({"ok": False, "error": "invalid layer traversal"}), 400
     if not layer_dir.exists():
         return jsonify({"ok": False, "error": "layer not found"}), 404
     body = request.get_json(force=True) or {}
@@ -4912,7 +4969,14 @@ def api_rmemory_lock_layer(layer):
 @app.route("/api/r-memory/unlock-layer/<layer>", methods=["POST"])
 def api_rmemory_unlock_layer(layer):
     """Unlock all documents in a layer. Requires password."""
-    layer_dir = SSOT_ROOT / layer
+    layer_str = str(layer)
+    if ".." in layer_str or layer_str.startswith("/") or layer_str.startswith("\\"):
+        return jsonify({"ok": False, "error": "invalid layer"}), 400
+    try:
+        layer_dir = (SSOT_ROOT / layer).resolve()
+        layer_dir.relative_to(SSOT_ROOT.resolve())
+    except ValueError:
+        return jsonify({"ok": False, "error": "invalid layer traversal"}), 400
     if not layer_dir.exists():
         return jsonify({"ok": False, "error": "layer not found"}), 404
     body = request.get_json(force=True) or {}
@@ -5264,6 +5328,58 @@ CHATBOTS_DB = Path(__file__).parent / "chatbots.db"
 def _get_db():
     db = sqlite3.connect(str(CHATBOTS_DB))
     db.row_factory = sqlite3.Row
+    
+    # Bootstrap schema
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS chatbots (
+            id TEXT PRIMARY KEY,
+            user_id TEXT,
+            name TEXT,
+            system_prompt TEXT,
+            greeting TEXT,
+            suggested_prompts TEXT,
+            position TEXT,
+            theme TEXT,
+            primary_color TEXT,
+            bg_color TEXT,
+            text_color TEXT,
+            allowed_domains TEXT,
+            rate_per_minute INTEGER,
+            rate_per_hour INTEGER,
+            enable_analytics INTEGER,
+            show_watermark INTEGER,
+            status TEXT,
+            created_at INTEGER,
+            updated_at INTEGER,
+            api_type TEXT,
+            model_id TEXT,
+            icon TEXT,
+            icon_type TEXT
+        )
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS chatbot_conversations (
+            id TEXT PRIMARY KEY,
+            chatbot_id TEXT,
+            user_ip TEXT,
+            started_at INTEGER,
+            last_message_at INTEGER,
+            ended_at INTEGER,
+            status TEXT
+        )
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS chatbot_messages (
+            id TEXT PRIMARY KEY,
+            conversation_id TEXT,
+            chatbot_id TEXT,
+            role TEXT,
+            content TEXT,
+            timestamp INTEGER
+        )
+    """)
+    db.commit()
+
     # Auto-migrate icon columns
     try:
         db.execute("ALTER TABLE chatbots ADD COLUMN icon TEXT DEFAULT '💬'")
@@ -5485,7 +5601,17 @@ def api_chatbot_knowledge_upload(bot_id):
         return jsonify({"error": "No file provided"}), 400
     f = request.files["file"]
     content = f.read().decode("utf-8", errors="replace")
+    
+    MAX_SIZE = 5 * 1024 * 1024
+    if len(content) > MAX_SIZE:
+        return jsonify({"error": "File exceeds 5MB limit"}), 400
+        
     db = _get_db()
+    
+    count = db.execute("SELECT COUNT(*) FROM knowledge_files WHERE chatbot_id=?", (bot_id,)).fetchone()[0]
+    if count >= 20:
+        db.close()
+        return jsonify({"error": "Maximum 20 knowledge files allowed per chatbot"}), 400
     db.execute(
         "INSERT INTO knowledge_files (chatbot_id, filename, content, file_size) VALUES (?,?,?,?)",
         (bot_id, f.filename, content, len(content)),
@@ -5752,7 +5878,7 @@ def api_shield_guard_unlock():
 def api_logician_status():
     """Read Logician monitor status file (deterministic, no AI)."""
     status_file = os.path.join(
-        str(Path.home()), "resonantos-augmentor", "logician", "monitor", "status.json"
+        str(Path.home()), "resonantos-alpha", "logician", "monitor", "status.json"
     )
     try:
         with open(status_file) as f:
@@ -6350,7 +6476,32 @@ try:
     print("[OK] Profile routes loaded")
 except Exception as _profile_err:
     print(f"[WARN] Profile routes not loaded: {_profile_err}")
+# ---------------------------------------------------------------------------
+# API: Stub/Dummy Routes (Fixing Frontend Contract Mismatches)
+# ---------------------------------------------------------------------------
+@app.route("/api/tasks", methods=["GET", "POST", "PUT", "DELETE"])
+def api_tasks_stub():
+    return jsonify({"tasks": [], "message": "Stub Route"})
 
+@app.route("/api/activity", methods=["GET"])
+def api_activity_stub():
+    return jsonify({"activities": []})
+
+@app.route("/api/chat/<path:chat_id>", methods=["GET", "POST", "PUT", "DELETE"])
+def api_chat_id_stub(chat_id):
+    return jsonify({"id": chat_id, "messages": [], "status": "stub"})
+
+@app.route("/api/widget/generate", methods=["POST"])
+def api_widget_generate_stub():
+    return jsonify({"response": "This is a stubbed response from the widget generator."})
+
+@app.route("/api/widget/init/<path:widget_id>", methods=["GET"])
+def api_widget_init_stub(widget_id):
+    return jsonify({"id": widget_id, "status": "ready", "config": {}})
+
+@app.route("/widget/v/<version>/widget.min.js", methods=["GET"])
+def api_widget_js_stub(version):
+    return "console.log('Widget script stub loaded.');", 200, {'Content-Type': 'application/javascript'}
 
 def main():
     """Start the dashboard server."""

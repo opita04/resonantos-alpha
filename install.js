@@ -102,7 +102,7 @@ ok("Extensions installed");
 
 // 5. SSoT template
 log("Setting up SSoT documents...");
-const ssotDir = path.join(OPENCLAW_WORKSPACE, "resonantos-augmentor", "ssot");
+const ssotDir = path.join(OPENCLAW_WORKSPACE, "resonantos-alpha", "ssot");
 mkdirp(ssotDir);
 const ssotEmpty = fs.readdirSync(ssotDir).length === 0;
 if (ssotEmpty) {
@@ -156,11 +156,11 @@ writeJsonIfMissing(
 writeJsonIfMissing(
   path.join(OPENCLAW_WORKSPACE, "r-awareness", "config.json"),
   {
-    ssotRoot: "resonantos-augmentor/ssot",
+    ssotRoot: "resonantos-alpha/ssot",
     coldStartOnly: true,
     coldStartDocs: ["L1/SSOT-L1-IDENTITY-STUB.ai.md"],
     tokenBudget: 15000,
-    maxDocs: 10,
+    maxDocsPerTurn: 10,
     ttlTurns: 15,
   },
   "R-Awareness config"

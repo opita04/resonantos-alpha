@@ -39,7 +39,7 @@ _PROJECT_ROOT = _SCRIPT_DIR.parent
 LOGICIAN_HOST = os.environ.get("LOGICIAN_HOST", "localhost")
 LOGICIAN_PORT = int(os.environ.get("LOGICIAN_PORT", "8080"))
 GRPCURL = os.path.expanduser(os.environ.get("GRPCURL", "~/go/bin/grpcurl"))
-PROTO_DIR = str(_PROJECT_ROOT / "logician" / "poc" / "mangle-service" / "proto")
+PROTO_DIR = str(_PROJECT_ROOT / "logician" / "mangle-service" / "proto")
 PROTO_FILE = "mangle.proto"
 
 # ============================================================
@@ -358,7 +358,12 @@ def pre_push_check(repo_path: str) -> int:
     diff_result = scan_git_diff(repo_path, staged=False)
 
     # Also scan what's about to be pushed (added lines only)
-    cmd = ["git", "-C", repo_path, "diff", "HEAD~1..HEAD", "--no-color"]
+    cmd = ["git", "-C", repo_path, "diff", "@{u}..HEAD", "--no-color"]
+    if subprocess.run(cmd, capture_output=True).returncode != 0:
+        cmd = ["git", "-C", repo_path, "diff", "origin/main..HEAD", "--no-color"]
+        if subprocess.run(cmd, capture_output=True).returncode != 0:
+            cmd = ["git", "-C", repo_path, "diff", "HEAD~1..HEAD", "--no-color"]
+
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         if proc.returncode == 0:
