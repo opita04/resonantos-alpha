@@ -110,3 +110,12 @@ This file tracks modifications made to the ResonantOS system architecture, confi
   - Implemented an IP-locking rate limit checker _check_rate_limit() wrapping the /api/widget/chat LLM proxy route, limiting it to 30 requests per minute to stop proxy abuse scraping out-of-the-box.
 - **Reason**: Recommended by the code review in CODE_REVIEW_FINDINGS.md to lock down unguarded endpoints containing conversation logs, configuration files, and raw LLM proxy endpoints. 
 - **Effect**: API scraping and LLM abuse vectors are largely eliminated without deploying complex external auth architectures.
+
+### openclaw.json — BOM Encoding & Invalid Key Fix
+- **Category**: Configuration / Bug Fix
+- **File Modified**: `~/.openclaw/openclaw.json`
+- **UTF-8 BOM Fix**: PowerShell's `Set-Content -Encoding utf8` was writing a UTF-8 BOM to `openclaw.json`. Node.js `JSON.parse()` treated the BOM as an unexpected token, causing R-Memory's `resolveApiKeyForProvider` to fail with `Credential scan failed`. Rewrote the file without BOM using `[System.IO.File]::WriteAllText()` with `UTF8Encoding($false)`.
+- **mcpServers Key Removed**: OpenClaw's config validator flagged `mcpServers` as an unrecognized top-level key. Removed it from `openclaw.json`.
+- **Gateway Restart**: Restarted the OpenClaw gateway via `openclaw gateway restart` to pick up the clean config.
+- **Reason**: R-Memory was unable to resolve API keys for the `minimax-portal` provider, causing narrative tracking to fail silently on every agent turn.
+- **Effect**: R-Memory now correctly resolves API keys from `auth-profiles.json` and narrative updates complete successfully.
