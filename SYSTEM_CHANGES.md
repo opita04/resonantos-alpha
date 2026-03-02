@@ -101,3 +101,12 @@ This file tracks modifications made to the ResonantOS system architecture, confi
   - **Go Mangle Service Race**: Refactored service.go to remove a global mutable programInfo variable, scoping it to a struct and wrapping accesses with mutex locks.
 - **Reason**: Recommended by the code review in CODE_REVIEW_FINDINGS.md to secure backend endpoints, correct misconfigurations, and prevent system compromise.
 - **Effect**: Enhanced security against path traversals and XSS. Better DevNet safety rails and resolved several operational errors including broken configurations and Linux compatibility logic.
+## [2026-03-02]
+### Code Review Security Fixes (CU 4 & CU 5 Auth & Rate Limiting)
+- **Category**: Security / Bug Fix
+- **Description**: Addressed unauthenticated endpoints (CU 4) and LLM abuse risks (CU 5) outlined in the code review by injecting basic header-based authentication checks and request limiting.
+  - Added a globally scoped _require_api_key() to dashboard/server_v2.py utilizing an injected OPENCLAW_API_KEY or generated memory token. 
+  - Applied the API check to /api/agents, /api/config, /api/conversations, and all Chatbot management CRUD APIs.
+  - Implemented an IP-locking rate limit checker _check_rate_limit() wrapping the /api/widget/chat LLM proxy route, limiting it to 30 requests per minute to stop proxy abuse scraping out-of-the-box.
+- **Reason**: Recommended by the code review in CODE_REVIEW_FINDINGS.md to lock down unguarded endpoints containing conversation logs, configuration files, and raw LLM proxy endpoints. 
+- **Effect**: API scraping and LLM abuse vectors are largely eliminated without deploying complex external auth architectures.

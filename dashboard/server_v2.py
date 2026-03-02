@@ -133,6 +133,40 @@ _BOUNTIES_FILE = _DASHBOARD_DIR / "data" / "bounties.json"
 _TRIBES_FILE = _DASHBOARD_DIR / "data" / "tribes.json"
 _PROFILES_FILE = _DASHBOARD_DIR / "data" / "profiles.json"
 
+# --- CU 4 & CU 5 Security Implementations ---
+import secrets
+import threading
+from flask import abort
+
+_API_KEY = os.environ.get("OPENCLAW_API_KEY") or _CFG.get("apiKey")
+if not _API_KEY:
+    _API_KEY = secrets.token_urlsafe(32)
+    print(f"SECURITY NOTICE: No API Key provided in environment or config. Using randomly generated API Key: {_API_KEY}")
+
+def _require_api_key():
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+    else:
+        token = request.args.get("apiKey", "")
+    if token != _API_KEY:
+        abort(401, "Unauthorized: Invalid or missing API Key")
+
+_ip_rate_limits = {}
+_ip_rate_lock = threading.Lock()
+_RATE_LIMIT_WINDOW = 60 # seconds
+_MAX_REQUESTS_PER_WINDOW = 30 # requests
+
+def _check_rate_limit(ip: str):
+    now = time.time()
+    with _ip_rate_lock:
+        timestamps = _ip_rate_limits.get(ip, [])
+        timestamps = [t for t in timestamps if now - t < _RATE_LIMIT_WINDOW]
+        if len(timestamps) >= _MAX_REQUESTS_PER_WINDOW:
+            abort(429, "Too Many Requests: Rate limit exceeded")
+        timestamps.append(now)
+        _ip_rate_limits[ip] = timestamps
+
 # Level thresholds for reputation
 _LEVEL_THRESHOLDS = [0, 10, 50, 150, 400, 1000, 2500, 6000, 15000, 40000]
 
@@ -3452,6 +3486,7 @@ def api_gateway_restart():
 @app.route("/api/agents")
 def api_agents():
     """List agents from gateway health + local workspace directories."""
+    _require_api_key()
     agents = []
     seen_ids = set()
 
@@ -5394,6 +5429,7 @@ def _get_db():
 @app.route("/api/chatbots")
 def api_chatbots():
     """List all chatbots."""
+    _require_api_key()
     if not CHATBOTS_DB.exists():
         return jsonify([])
     db = _get_db()
@@ -5417,6 +5453,7 @@ def api_chatbots():
 @app.route("/api/chatbots/<bot_id>")
 def api_chatbot_detail(bot_id):
     """Get a single chatbot."""
+    _require_api_key()
     db = _get_db()
     bot = db.execute("SELECT * FROM chatbots WHERE id=?", (bot_id,)).fetchone()
     if not bot:
@@ -5431,6 +5468,7 @@ def api_chatbot_detail(bot_id):
 @app.route("/api/chatbots", methods=["POST"])
 def api_chatbot_create():
     """Create a new chatbot."""
+    _require_api_key()
     import uuid, time
     body = request.get_json(force=True)
     bot_id = uuid.uuid4().hex[:8]
@@ -5459,6 +5497,7 @@ def api_chatbot_create():
 @app.route("/api/chatbots/<bot_id>", methods=["PUT"])
 def api_chatbot_update(bot_id):
     """Update a chatbot."""
+    _require_api_key()
     import time
     body = request.get_json(force=True)
     db = _get_db()
@@ -5491,6 +5530,7 @@ def api_chatbot_update(bot_id):
 @app.route("/api/chatbots/<bot_id>", methods=["DELETE"])
 def api_chatbot_delete(bot_id):
     """Delete a chatbot and its data."""
+    _require_api_key()
     db = _get_db()
     db.execute("DELETE FROM chatbot_messages WHERE chatbot_id=?", (bot_id,))
     db.execute("DELETE FROM chatbot_conversations WHERE chatbot_id=?", (bot_id,))
@@ -5502,6 +5542,7 @@ def api_chatbot_delete(bot_id):
 @app.route("/api/chatbots/<bot_id>/conversations")
 def api_chatbot_conversations(bot_id):
     """List conversations for a chatbot."""
+    _require_api_key()
     db = _get_db()
     convs = [dict(r) for r in db.execute(
         "SELECT * FROM chatbot_conversations WHERE chatbot_id=? ORDER BY started_at DESC LIMIT 50",
@@ -5512,6 +5553,7 @@ def api_chatbot_conversations(bot_id):
 @app.route("/api/conversations")
 def api_conversations():
     """List conversations across all chatbots with filtering/pagination."""
+    _require_api_key()
     limit = request.args.get("limit", 20, type=int)
     offset = request.args.get("offset", 0, type=int)
     chatbot_id = request.args.get("chatbot_id", "")
@@ -5666,6 +5708,7 @@ def api_system_keys():
 @app.route("/api/widget/chat", methods=["POST"])
 def api_widget_chat():
     """Handle chat messages from the embeddable widget."""
+    _check_rate_limit(request.remote_addr)
     data = request.get_json() or {}
     bot_id = data.get("botId")
     messages = data.get("messages", [])
@@ -6120,6 +6163,7 @@ def api_system_restart():
 @app.route("/api/config")
 def api_config():
     """Read openclaw.json (redacting sensitive fields)."""
+    _require_api_key()
     try:
         cfg = json.loads(OPENCLAW_CONFIG.read_text())
         # Redact token
