@@ -71,3 +71,11 @@ This file tracks modifications made to the ResonantOS system architecture, confi
   - Hardcoded version: Updated `server_v2.py` to display "V5.0.1 running" instead of the old "V4.6.1" label.
   - Architecture note: R-Memory V5.0.1 uses *on-demand* compression. It does not compress when context passes the R-Memory trigger (e.g., 36k), but waits until OpenClaw fires `session_before_compact` at its own threshold (near the model's 200k max limit), at which point R-Memory compresses all queued blocks down to 36k at once.
   - "Stuck" yellow bar fix: The "Conversation → Compression" UI progress bar was originally calculating its percentage based on the target (36k), causing it to prematurely hit 100% and appear stuck for a long time. It has been updated to calculate against the 200k context limit (when OpenClaw actually fires the trigger), and the label changed to "Context Filling (will compress down to 36k at 200k)" for clarity.
+
+## [2026-03-01]
+### R-Awareness Configuration fix
+- **Category**: Bug Fix
+- **File Modified**: `~/.openclaw/workspace/r-awareness/config.json`
+- **Description**: Updated `ssotRoot` from relative path `resonantos-augmentor/ssot` to absolute path `C:\\AI\\Openclaw-Projects\\resonantos-alpha\\ssot`.
+- **Reason**: The relative path did not exist and caused R-Awareness to constantly error out with `ssotRoot directory not found` and fail to load documents.
+- **Effect**: R-Awareness can successfully find the local SSoT directory and inject documents correctly.

@@ -13,7 +13,7 @@ trigger: always_on
 - **Protocol**: Include the date, the category of change, a brief description of what was changed, the reason, and the effect.
 
 ### 3. Automatic GitHub Synchronization
-- **Rule**: After every 5 entries added to `SYSTEM_CHANGES.md`, the agent MUST automatically commit and push all local changes to the GitHub repository [opita04/resonantos-alpha](https://github.com/opita04/resonantos-alpha).
+- **Rule**: After every 2 entries added to `SYSTEM_CHANGES.md`, the agent MUST automatically commit and push all local changes to the GitHub repository [opita04/resonantos-alpha](https://github.com/opita04/resonantos-alpha).
 - **Protocol**:
   1. Count the number of entries in `SYSTEM_CHANGES.md` (each header like `## [YYYY-MM-DD]` or individual bullet point counts toward the logic).
   2. Perform a `git pull origin main` to ensure sync.
