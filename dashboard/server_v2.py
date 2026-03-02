@@ -56,7 +56,7 @@ except ImportError:
 OPENCLAW_HOME = Path.home() / ".openclaw"
 OPENCLAW_CONFIG = OPENCLAW_HOME / "openclaw.json"
 WORKSPACE = OPENCLAW_HOME / "workspace"
-SSOT_ROOT = WORKSPACE / "resonantos-augmentor" / "ssot"
+SSOT_ROOT = Path("C:/AI/Openclaw-Projects/resonantos-alpha/ssot")
 AGENTS_DIR = OPENCLAW_HOME / "agents"
 EXTENSIONS_DIR = OPENCLAW_HOME / "extensions"
 RMEMORY_DIR = WORKSPACE / "r-memory"

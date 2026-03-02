@@ -79,3 +79,10 @@ This file tracks modifications made to the ResonantOS system architecture, confi
 - **Description**: Updated `ssotRoot` from relative path `resonantos-augmentor/ssot` to absolute path `C:\\AI\\Openclaw-Projects\\resonantos-alpha\\ssot`.
 - **Reason**: The relative path did not exist and caused R-Awareness to constantly error out with `ssotRoot directory not found` and fail to load documents.
 - **Effect**: R-Awareness can successfully find the local SSoT directory and inject documents correctly.
+
+### Dashboard SSoT Root Fix
+- **Category**: Bug Fix
+- **File Modified**: `dashboard/server_v2.py`
+- **Description**: Updated the hardcoded `SSOT_ROOT` from `WORKSPACE / "resonantos-augmentor" / "ssot"` to point to the correct local repository path `C:\AI\Openclaw-Projects\resonantos-alpha\ssot`.
+- **Reason**: The dashboard was looking for the SSoT files in the wrong directory, preventing it from displaying SSoT files accurately in the UI. 
+- **Effect**: Server now points to the actual SSoT library. Server restarted to apply changes.
